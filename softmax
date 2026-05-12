@@ -1,1 +1,114 @@
 import torch
+import torchvision
+from IPython import display
+from d2l import torch as d2l
+
+batch_size=256
+mnist_train=torchvision.datasets.FashionMNIST(root="./data",download=True,transform=torchvision.transforms.ToTensor(),train=True)
+mnist_test=torchvision.datasets.FashionMNIST(root="./data",download=True,transform=torchvision.transforms.ToTensor(),train=False)
+train_iter=torch.utils.data.DataLoader(mnist_train,shuffle=True,batch_size=batch_size)
+test_iter=torch.utils.data.DataLoader(mnist_test,shuffle=True,batch_size=batch_size)
+num_inputs=784
+num_outputs=10
+device=torch.device("cuda")
+W=torch.normal(0,0.01,size=(num_inputs,num_outputs),requires_grad=True,device=device)
+b=torch.zeros(num_outputs,requires_grad=True,device=device)
+#定义一个softmax回归函数
+def softmax(X):
+    X_exp=torch.exp(X)
+    partition=X_exp.sum(1,keepdim=True)
+    return X_exp/partition
+#定义模型
+def net(X):
+   return softmax(torch.matmul(X.reshape((-1,W.shape[0])),W)+b)
+#定义交叉熵
+def cross_entropy(y_hat,y):
+  return -torch.log(y_hat[range(len(y_hat)),y])
+#计算准确率
+def accuracy(y_hat,y):
+  if len(y_hat.shape)>1 and y_hat.shape[1]>1:
+      y_hat=y_hat.argmax(axis=1)
+  cmp=y_hat.type(y.dtype)==y
+  return float(cmp.type(y.dtype).sum())
+#累加器
+class Accumulator():
+   def __init__(self,n):
+      self.data=[0.0]*n
+   def add(self,*args):
+      self.data=[a+float(b) for a,b in zip(self.data,args)]
+   def reset(self):
+      self.data=[0.0]*len(self.data)
+   def __getitem__(self,idx):
+      return self.data[idx]
+#定义一个评估函数
+def evaluate_accuracy(net,data_iter):
+  if isinstance(net,torch.nn.Module):
+     net.eval()
+  metric=Accumulator(2)
+  with torch.no_grad():
+     for X,y in data_iter:
+         X,y=X.to(device),y.to(device)
+         metric.add(accuracy(net(X),y),y.numel())
+     return metric[0]/metric[1]
+#随机小梯度下降
+lr=0.1
+def sgd(params,lr,batch_size):
+   with torch.no_grad():
+     for param in params:
+       param-=lr*param.grad/batch_size
+       param.grad.zero_()
+#训练流程
+def train_epoch(net,train_iter,loss,lr,batch_size):
+    metric=Accumulator(3)
+    for X,y in train_iter:
+      X,y=X.to(device),y.to(device)
+      y_hat=net(X)
+      l=loss(y_hat,y)
+      l.sum().backward()
+      sgd([W,b],lr,batch_size)
+      metric.add(l.sum(),accuracy(y_hat,y),l.numel())
+    return metric[0]/metric[2],metric[1]/metric[2]
+num_epoches=10
+for epoch in range(num_epoches):
+   train_loss,train_acc=train_epoch(net,train_iter,cross_entropy,lr,batch_size)
+   test_acc=evaluate_accuracy(net,test_iter)
+   print(f"epoch {epoch+1} train_loss:{train_loss:.2f} train_acc:{train_acc:.2f},"
+         f"test_acc:{test_acc:.2f}")
+
+
+     
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
