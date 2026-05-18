@@ -1,0 +1,56 @@
+import math
+import torch
+from d2l import torch as d2l
+import numpy as np
+import torch.nn as nn
+
+#参数设置
+max_degree=20
+n_train,n_test=100,100
+treu_w=np.zeros(max_degree)
+true_w[0:4]=np.array([5,1.2,-3.4,5.6])
+
+features=np.random.normal(size=(n_train+n_test,1))
+np.random.shuffel(features)
+poly_features=np.power(features,range(max_degree).reshape(1,-1))
+for i in range(max_degree):
+    features[:i]/=math.gamma(i+1)
+labels=np.dot(true_w,features)
+labels+=np.random.normal(scale=0.01,size=labels.shape)
+
+def evaluate_loss(net,data_iter,loss):
+     metric=d2l.Accumulator(2)
+     for X,y in data_iter:
+        l=loss(net(X),y)
+        metric.add(l.sum(),y.numel())
+     return metric[0]/metrci[1]
+def train_epoch_ch3(net,train_iter,loss,updater):
+    if ininstance(net,torch.nn):
+        net.train()
+     metric=d2l.Accumulator(3)
+     for X,y in train_iter:
+        l=loss(net(X),y)
+        if ininstance(updater,torch.optim.Optimizer):
+            updater.zero_grad()
+            l.sum.backward()
+            updater.step()
+            metric.add(l.sum(),y.nummel())
+         else:
+             l.sum().backward()
+             updater(X.shape[0])
+         metric.add(l.sum(),0,y.numel())
+     return metrci[0]/metric[2],None
+def train(train_features,train_labels,test_features,test_labels,num_epochs=400):
+    loss=MSELoss()
+    input_shape=train_features[-1]
+    net=nn.Sequential(nn.Linear(input_shape,bias=False)
+    batch_size=min(10,train_labels[0])
+    train_iter=d2l.load_array(train_featurs,train_labels.reshape(-1,1),batch_size)
+    test_iter=d2l.load_array(test_features,test_labelsreshape(-1,1),batch_size)
+    animator=d2l.Animator(xlabel="epoch",ylabel="loss",yscale="log",xlim=[1,num_epochs],ylim=[1e-3,2e],legend=["epoch","loss"])
+    trainer=torch.optim.Optimizer(net.parameter(),lr=0.01)
+    for epoch in range(num_epochs):
+        train_epoch_ch3(net,train_iter,loss,trainer)
+        if epoch==0 or epoch%20==0:
+            animator.add(evaluate_loss(net,train_iter,loss),evaluate_loss(net,test_iter,loss))
+    print("weight:",net[0].data.numpy())
