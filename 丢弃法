@@ -1,80 +1,126 @@
 import torch
-from d2l import torch as d2l
 import torch.nn as nn
+from d2l import torch as d2l
 def dropout_layer(X,dropout):
     assert 0<=dropout<=1
-    if dropout==1:
-        return torch.zeros_like(X)
     if dropout==0:
         return X
+    if dropout==1:
+        return torch.zeros_like(X)
     mask=(torch.rand(X.shape)>dropout).float()
-    return (X*mask)/1-dropout
+    return mask*X/(1.0-dropout)
 num_inputs,num_outputs,num_hidden1,num_hidden2=784,10,256,256
 dropout1,dropout2=0.2,0.5
-class Net(nn.MOdule):
+class Net(nn.Module):
     def __init__(self,num_inputs,num_outputs,num_hidden1,num_hidden2,is_training=True):
         super(Net,self).__init__()
+        self.num_inputs=num_inputs
         self.training=is_training
         self.lin1=nn.Linear(num_inputs,num_hidden1)
         self.lin2=nn.Linear(num_hidden1,num_hidden2)
         self.lin3=nn.Linear(num_hidden2,num_outputs)
         self.relu=nn.ReLU()
     def forward(self,X):
-        H1=self.relu(self.lin1(X.reshape(-1,num_inputs)))
+        H1=self.relu(self.lin1(X.reshape(-1,self.num_inputs)))
         if self.training==True:
             H1=dropout_layer(H1,dropout1)
-        H2=self.relu(self.lin2(X.reshape(-1,num_outputs)))
+        H2=self.relu(self.lin2(H1))
         if self.training==True:
             H2=dropout_layer(H2,dropout2)
         out=self.lin3(H2)
         return out
 net=Net(num_inputs,num_outputs,num_hidden1,num_hidden2)
 num_epochs,lr,batch_size=10,0.5,256
-loss=nn.MSELoss()
+loss=nn.CrossEntropyLoss()
 import torchvision
-train_data=torchvision.datasets.FashionMNIST(root="./data",train=True,download=True,transform=torchvision.transforms.ToTensor())
-test_data=torchvision.datasets.FashionMNIST(root="./data",train=False,download=True,transform=torchvision.transforms.ToTensor())
+train_data=torchvision.datasets.FashionMNIST(root="./data",download=True,transform=torchvision.transforms.ToTensor(),train=True)
+test_data=torchvision.datasets.FashionMNIST(root="./data",download=True,transform=torchvision.transforms.ToTensor(),train=False)
 train_iter=torch.utils.data.DataLoader(train_data,shuffle=True,batch_size=batch_size)
 test_iter=torch.utils.data.DataLoader(test_data,shuffle=True,batch_size=batch_size)
-class Acumulator:
-    def __init__(self,n):
-        self.data=[0.0]*n
-    def add(*args,self):
-        self.data=[a +float(b) for a,b in zip(self.data,args)]
-    def asset(self):
-        self.data=[0.0]*len(self.data)
-    def __getitem__(self,idx):
+trainer=torch.optim.SGD(net.parameters(),lr=lr)
+class Accumulator:
+    """在 n 个变量上累加数值（用于汇总一个 epoch 的总 loss、总正确数等）"""
+    def __init__(self, n):
+        self.data = [0.0] * n
+
+    def add(self, *args):
+        # 将 args 中各值对位加到 self.data 上
+        self.data = [a + float(b) for a, b in zip(self.data, args)]
+
+    def reset(self):
+        self.data = [0.0] * self.data.__len__()
+
+    def __getitem__(self, idx):
         return self.data[idx]
-def accuracy(y_hat,y):
-    if (y_hat.shape>1) and y_hat.shape[1]>1:
-        y_hat=y_hat.argmax(y_hat)
-    cmp=y_hat.shape(y.dtype)==y
-    return float(cmp.type(y.dtype),y.numel())
-def evaluate_loss(net,data_iter):
-    metric=Accumulator(2)
-    with torch.no_grad():
-        for X,y in data_iter:
-            metric.add(accuracy(net(X),y))
-    return metric(0)/metric(1)
-def train_epoch(net,train_iter,loss,updater):
-    metric=Accumulator(3)
-    if isinstance(net,torch.nn.Module):
-        net.train()
-    for X,y in train_iter:
-       l=loss(net(X),y)
-       l.sum().backward()
-    if isinstance(updater,torch.optim.Optimizer):
-        updater.zero_grad()
-        l.mean().backward()
-        updater.step()
-    else:
-        l.sum().backward()
-        updater(X.shape[0])
-    metric.add(accuracy(net(X),y),l.sum(),y.numel())
-    return metric[0]/metric[2],metric[1]/metric[2]
-def train_ch3(num_epochs,jtrain_iter,updater,loss):
+def accuracy(y_hat, y):
+    """计算一个 batch 中预测正确的样本数量"""
+    if len(y_hat.shape) > 1 and y_hat.shape[1] > 1:
+        # y_hat 形状 [batch, num_classes]，取最大 logit 的索引作为预测类别
+        y_hat = y_hat.argmax(axis=1)
+    # 与真实标签 y 逐元素比较，求和得到正确个数
+    cmp = y_hat.type(y.dtype) == y
+    return float(cmp.type(y.dtype).sum())
+def evaluate_accuracy(net, data_iter, device=None):
+    """在整个 data_iter 上计算模型准确率"""
+    if isinstance(net, torch.nn.Module):
+        net.eval()                    # 切换到评估模式（关闭 dropout 等）
+        if not device:
+            device = next(iter(net.parameters())).device
+        # 创建一个累加器，槽位 0=总正确数，槽位 1=总样本数
+        metric = Accumulator(2)
+        with torch.no_grad():         # 评估阶段不需要梯度
+            for X, y in data_iter:
+                if isinstance(X, list):
+                    X = [x.to(device) for x in X]
+                else:
+                    X = X.to(device)
+                y = y.to(device)
+                # 累加：正确数, 样本数
+                metric.add(accuracy(net(X), y), y.numel())
+        return metric[0] / metric[1]  # 总正确数 / 总样本数
+def train_epoch_ch3(net, train_iter, loss, updater):
+    """训练一个 epoch，返回平均 loss 和准确率"""
+    if isinstance(net, torch.nn.Module):
+        net.train()  # 切换到训练模式（开启 dropout、BatchNorm 等）
+    # 累加器分别记录：总 loss、总正确数、总样本数
+    metric = Accumulator(3)
+
+    for X, y in train_iter:
+        # === 1. 前向传播 ===
+        y_hat = net(X)                 # 输入特征 → 网络输出 logits
+        l = loss(y_hat, y)             # 与真实标签比较，得到标量 loss
+
+        # === 2. 反向传播 ===
+        if isinstance(updater, torch.optim.Optimizer):
+            # 使用 PyTorch 优化器时
+            updater.zero_grad()        # 清空上一轮的梯度
+            l.mean().backward()        # 对 batch 平均 loss 反向传播，计算梯度
+            updater.step()             # 根据梯度更新参数
+        else:
+            # 兼容手动实现的优化器（如 d2l 自己的 SGD）
+            l.sum().backward()
+            updater(X.shape[0])
+
+        # === 3. 记录指标 ===
+        metric.add(
+            float(l.sum()),            # 这个 batch 的总 loss
+            accuracy(y_hat, y),        # 这个 batch 的正确样本数
+            y.numel()                  # 这个 batch 的样本总数
+        )
+
+    # epoch 结束后返回：平均 loss、准确率
+    return metric[0] / metric[2], metric[1] / metric[2]
+def train_ch3(net, train_iter, test_iter, loss, num_epochs, updater):
+    """完整训练流程：多个 epoch，每个 epoch 后输出训练/测试的 loss 和准确率"""
     for epoch in range(num_epochs):
-        train_acc,train_loss=train_epoch(net,train_iter,loss,updater)
-        test_loss=evaluate_loss(net,test_iter)
-    print(f"train_acc:{train_acc:.3f},train_loss:{train_loss:.3f},test_loss:{test_loss:.3f}")
-train_ch3(num_epochs,train_iter,updater,loss)
+        # 训练一个 epoch
+        train_loss, train_acc = train_epoch_ch3(net, train_iter, loss, updater)
+
+        # 在测试集上评估
+        test_acc = evaluate_accuracy(net, test_iter)
+
+        # 打印结果
+        print(f'epoch {epoch + 1}, '
+              f'loss {train_loss:.3f}, train acc {train_acc:.3f}, '
+              f'test acc {test_acc:.3f}')
+train_ch3(net,train_iter,test_iter,loss,num_epochs,trainer)
