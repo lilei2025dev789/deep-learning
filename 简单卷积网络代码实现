@@ -31,3 +31,6 @@ for i in range(100):
     conv2d.weight.data[:]-=lr*conv2d.weight.grad
     if (i+1)%10==0:
         print(f"epoch{i+1} loss:{l.sum():.3f}")
+这里还有一种比较复杂的，即填充padding和步长stride
+1.填充一般采用核-1，然后步长一般用1,2具体情况具体看，看训练的难度决定
+2.其中输出结果为(原矩阵通道数或维数-核的通道或维数+padding+stride)/stride
